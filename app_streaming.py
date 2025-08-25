@@ -1,57 +1,30 @@
 import streamlit as st
-from strands import Agent
-from strands.models import BedrockModel
+import json
 
-import tools.list_appointments
-import tools.update_appointment
-import tools.create_appointment
-from strands_tools import calculator, current_time
+from my_agent import MyAgent
 
 # Initialize session state for conversation history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # Add title on the page
-st.title("Streamlit Strands Demo")
-st.write("This demo shows how to use Strands to create a personal assistant that can manage appointments and calendar. It also has a calculator tool.")
+st.title("데모 제목입니다.")
+st.write("데모 설명 페이지입니다.")
 
-# Define agent
-system_prompt = """You are a helpful personal assistant that specializes in managing my appointments and calendar. 
-You have access to appointment management tools, a calculator, and can check the current time to help me organize my schedule effectively. 
-Always provide the appointment id so that I can update it if required. Format your results in markdown when needed."""
-
-model = BedrockModel(
-    model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-    max_tokens=64000,
-    additional_request_fields={
-        "thinking": {
-            "type": "disabled",
-        }
-    },
-)
-
+my_agent = MyAgent()
 # Initialize the agent
 if "agent" not in st.session_state:
-    st.session_state.agent = Agent(
-        model=model,
-        system_prompt=system_prompt,
-        tools=[
-            current_time,
-            calculator,
-            tools.create_appointment,
-            tools.list_appointments,
-            tools.update_appointment,
-        ],
-    )
+    st.session_state.agent = my_agent.get_agent()
+
+if "start_index" not in st.session_state:
+    st.session_state.start_index = 0
+
 
 # Display old chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.empty()  # This forces the container to render without adding visible content (workaround for streamlit bug)
-        if message.get("type") == "tool_use":
-            st.code(message["content"])
-        else:
-            st.markdown(message["content"])
+        st.markdown(message["content"])
 
 # Chat input
 if prompt := st.chat_input("Ask your agent..."):
@@ -66,55 +39,52 @@ if prompt := st.chat_input("Ask your agent..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    # Prepare containers for response
-    with st.chat_message("assistant"):
-        st.session_state.details_placeholder = st.empty()  # Create a new placeholder
-    
-    # Initialize strings to store streaming of model output
-    st.session_state.output = []
-
-    # Create the callback handler to display streaming responses
-    def custom_callback_handler(**kwargs):
-        def add_to_output(output_type, content, append = True):
-            if len(st.session_state.output) == 0:
-                st.session_state.output.append({"type": output_type, "content": content})
-            else:
-                last_item = st.session_state.output[-1]
-                if last_item["type"] == output_type:
-                    if append:
-                        st.session_state.output[-1]["content"] += content
-                    else:
-                        st.session_state.output[-1]["content"] = content
-                else:
-                    st.session_state.output.append({"type": output_type, "content": content})
-
-        with st.session_state.details_placeholder.container():
-            current_streaming_tool_use = ""
-            # Process stream data
-            if "data" in kwargs:
-                add_to_output("data", kwargs["data"])
-            elif "current_tool_use" in kwargs and kwargs["current_tool_use"].get("name"):
-                tool_use_id = kwargs["current_tool_use"].get("toolUseId")
-                current_streaming_tool_use = "Using tool: " + kwargs["current_tool_use"]["name"] + " with args: " + str(kwargs["current_tool_use"]["input"])
-                add_to_output("tool_use", current_streaming_tool_use, append = False)
-            elif "reasoningText" in kwargs:
-                add_to_output("reasoning", kwargs["reasoningText"])
-
-            # Display output
-            for output_item in st.session_state.output:
-                if output_item["type"] == "data":
-                    st.markdown(output_item["content"])
-                elif output_item["type"] == "tool_use":
-                    st.code(output_item["content"])
-                elif output_item["type"] == "reasoning":
-                    st.markdown(output_item["content"])
-    
-    # Set callback handler into the agent
-    st.session_state.agent.callback_handler = custom_callback_handler
-    
     # Get response from agent
-    response = st.session_state.agent(prompt)
+    with st.spinner("Thinking..."):
+        response = st.session_state.agent(prompt)
+    
+    assistant_response = ""
+    for m in st.session_state.agent.messages:
+        if m.get("role") == "assistant" and m.get("content"):
+            for content_item in m.get("content", []):
+                if "text" in content_item:
+                    # We keep only the last response of the assistant
+                    assistant_response = content_item["text"]
+                    break
+    
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+    
+    # Display assistant response
+    with st.chat_message("assistant"):
+        
+        start_index = st.session_state.start_index      
 
-    # When done, add assistant messages to chat history
-    for output_item in st.session_state.output:
-            st.session_state.messages.append({"role": "assistant", "type": output_item["type"] , "content": output_item["content"]})
+        # Display last messages from agent, with tool usage detail if any
+        st.session_state.details_placeholder = st.empty()  # Create a new placeholder
+        with st.session_state.details_placeholder.container():
+            for m in st.session_state.agent.messages[start_index:]:
+                if m.get("role") == "assistant":
+                    for content_item in m.get("content", []):
+                        if "text" in content_item:
+                            st.write(content_item["text"])
+                        elif "toolUse" in content_item:
+                            tool_use = content_item["toolUse"]
+                            tool_name = tool_use.get("name", "")
+                            tool_input = tool_use.get("input", {})
+                            st.info(f"Using tool: {tool_name}")
+                            st.code(json.dumps(tool_input, indent=2))
+            
+                elif m.get("role") == "user":
+                    for content_item in m.get("content", []):
+                        if "toolResult" in content_item:
+                            tool_result = content_item["toolResult"]
+                            st.info(f"Tool Result: {tool_result.get('status', '')}")
+                            for result_content in tool_result.get("content", []):
+                                if "text" in result_content:
+                                    st.code(result_content["text"])
+
+        # Update the number of previous messages
+        st.session_state.start_index = len(st.session_state.agent.messages)
+    
+
