@@ -36,11 +36,6 @@ class MyAgent():
                     StdioServerParameters(
                         command='uvx',
                         args=['awslabs.aws-documentation-mcp-server@latest'],
-                        env={
-                            "FASTMCP_LOG_LEVEL": "ERROR",
-                            "AWS_PROFILE": "default",
-                            "AWS_REGION": "us-east-1"
-                        },
                         disabled=False,
                         autoApprove=[]
                     )
