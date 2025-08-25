@@ -2,6 +2,9 @@ from strands import Agent, tool
 from strands_tools import file_read
 from strands.models import BedrockModel
 import logging
+from contextlib import contextmanager
+from strands.tools.mcp.mcp_client import MCPClient
+from mcp import stdio_client, StdioServerParameters
 
 # Configure the root strands logger
 logging.getLogger("strands").setLevel(logging.DEBUG)
@@ -20,19 +23,41 @@ system_prompt = """
 사용자가 정비 항목에 대한 질문을 하면 search_vehicle_maintenance을 사용하세요.
 """
 
-# agent = Agent(model=bedrock_model, system_prompt=system_prompt, 
-#               tools=[])
-
-# response = agent("엔진오일 정비 기간 알고 싶어")
-
 
 class MyAgent():
-
     def __init__(self):
-        self.agent = Agent(model=bedrock_model, system_prompt=system_prompt, tools=[])
-    
-    def get_agent(self):
+        self.mcp_client = None
+        self.agent = None
+
+    def initialize_mcp(self):
+        if self.mcp_client is None:
+            try:
+                self.mcp_client = MCPClient(lambda: stdio_client(
+                    StdioServerParameters(
+                        command='uvx',
+                        args=['awslabs.aws-documentation-mcp-server@latest'],
+                        env={
+                            "FASTMCP_LOG_LEVEL": "ERROR",
+                            "AWS_PROFILE": "default",
+                            "AWS_REGION": "us-east-1"
+                        },
+                        disabled=False,
+                        autoApprove=[]
+                    )
+                ))
+                self.mcp_client.start()
+                tools = self.mcp_client.list_tools_sync()
+                self.agent = Agent(model=bedrock_model, system_prompt=system_prompt, tools=tools)
+            except Exception as e:
+                print(f"MCP 초기화 실패: {e}")
+                # MCP 실패시 기본 agent 사용
+                self.agent = Agent(model=bedrock_model, system_prompt=system_prompt)
+
         return self.agent
 
-
-
+    def cleanup(self):
+        if self.mcp_client:
+            try:
+                self.mcp_client.stop()
+            except:
+                pass
