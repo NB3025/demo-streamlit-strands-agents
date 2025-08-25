@@ -10,6 +10,7 @@ if "messages" not in st.session_state:
 # Add title on the page
 st.title("데모 제목입니다.")
 st.write("데모 설명 페이지입니다.")
+st.set_page_config(layout="wide")
 
 my_agent = MyAgent()
 # Initialize the agent
