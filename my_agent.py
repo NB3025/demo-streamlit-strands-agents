@@ -20,7 +20,6 @@ bedrock_model = BedrockModel(max_tokens=4096, model_id=model_id)
 
 system_prompt = """
 당신은 Agent입니다. 사용자의 질문에 답하세요. 
-사용자가 정비 항목에 대한 질문을 하면 search_vehicle_maintenance을 사용하세요.
 """
 
 
